@@ -19,13 +19,4 @@ router.post(
   referralController.applyReferralCode.bind(referralController)
 );
 
-// Admin Referral Settings
-router.get('/settings', isAdmin(), referralController.getSettings.bind(referralController));
-router.put(
-  '/settings',
-  isAdmin(),
-  validateBody(updateReferralSettingsSchema),
-  referralController.updateSettings.bind(referralController)
-);
-
 export default router;

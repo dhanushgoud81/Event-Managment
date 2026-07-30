@@ -168,20 +168,35 @@ export class RegistrationService {
         });
 
         if (referrer && referrer.id !== userId) {
-          // Verify they haven't registered before (only valid for new signups)
-          const previousRegCount = await tx.registration.count({
-            where: { userId, NOT: { id: registration.id } },
+          // Requirement: Referrer MUST have an active/confirmed registration for this specific event to refer others!
+          const referrerEventReg = await tx.registration.findFirst({
+            where: {
+              userId: referrer.id,
+              eventId,
+              status: { in: [RegistrationStatus.CONFIRMED, RegistrationStatus.PENDING] },
+            },
           });
 
-          if (previousRegCount === 0) {
-            // Create pending Referral tracker
+          if (referrerEventReg) {
+            // Calculate referral discount amount for this referral action based on Event settings
+            let rewardAmount = 0;
+            const rewardValue = event.referralRewardValue.toNumber();
+
+            if (event.referralRewardType === 'FIXED') {
+              rewardAmount = rewardValue;
+            } else if (event.referralRewardType === 'PERCENTAGE') {
+              const ticketPrice = ticket.price.toNumber();
+              rewardAmount = (ticketPrice * rewardValue) / 100;
+            }
+
+            // Create pending Referral tracker linked to this event registration
             await tx.referral.create({
               data: {
                 referrerId: referrer.id,
                 referredId: userId,
                 registrationId: registration.id,
-                rewardAmount: 0,
-                status: 'PENDING',
+                rewardAmount,
+                status: ticket.price.toNumber() === 0 ? 'COMPLETED' : 'PENDING',
               },
             });
           }

@@ -38,7 +38,6 @@ const adminNavItems: NavItem[] = [
   { path: '/admin/registrations', label: 'Registrations', icon: ClipboardList },
   { path: '/admin/payments', label: 'Payments', icon: CreditCard },
   { path: '/admin/users', label: 'Users', icon: Users },
-  { path: '/admin/referrals', label: 'Referrals', icon: Gift },
   { path: '/admin/reports', label: 'Reports', icon: BarChart3 },
   { path: '/admin/audit-logs', label: 'Audit Logs', icon: FileText },
   { path: '/admin/settings', label: 'Settings', icon: Settings },

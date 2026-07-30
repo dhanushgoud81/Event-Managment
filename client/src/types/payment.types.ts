@@ -33,6 +33,9 @@ export interface CreateOrderResponse {
   cashfreeOrderId: string;
   paymentSessionId: string;
   amount: number;
+  originalPrice?: number;
+  referralDiscountApplied?: number;
+  isFreeWithDiscount?: boolean;
   currency: string;
   environment: 'TEST' | 'PRODUCTION';
   isMock: boolean;

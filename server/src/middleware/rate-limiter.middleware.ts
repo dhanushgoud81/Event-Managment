@@ -7,7 +7,7 @@ import { logger } from '../utils/logger';
  * 100 requests per 15 minutes
  */
 export const generalLimiter = rateLimit({
-  windowMs: config.rateLimit.windowMs,
+  skip: () => config.isDev,
   max: config.rateLimit.maxRequests,
   standardHeaders: true,
   legacyHeaders: false,
@@ -24,12 +24,8 @@ export const generalLimiter = rateLimit({
   },
 });
 
-/**
- * Auth endpoints rate limiter (stricter)
- * 5 requests per 15 minutes
- */
 export const authLimiter = rateLimit({
-  windowMs: config.rateLimit.windowMs,
+  skip: () => config.isDev,
   max: config.rateLimit.authMax,
   standardHeaders: true,
   legacyHeaders: false,

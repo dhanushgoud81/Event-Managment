@@ -83,7 +83,7 @@ export const PaymentsPage: React.FC = () => {
 
               cashfree.checkout({
                 paymentSessionId: orderData.paymentSessionId,
-                redirectTarget: '_self',
+                redirectTarget: '_modal',
               });
             } catch (err: any) {
               toast.error(`Cashfree SDK Initialization failed: ${err.message}`);
@@ -149,12 +149,20 @@ export const PaymentsPage: React.FC = () => {
               <span className="font-semibold">{reg.ticketCategory?.name}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-surface-400">Subtotal:</span>
-              <span className="font-semibold">₹{reg.amountPaid}</span>
+              <span className="text-surface-400">Ticket Base Price:</span>
+              <span className="font-semibold">₹{reg.ticketCategory?.price || reg.amountPaid}</span>
             </div>
+            {orderMutation.data?.data.referralDiscountApplied && orderMutation.data.data.referralDiscountApplied > 0 ? (
+              <div className="flex justify-between text-success-600 dark:text-success-400 font-semibold">
+                <span>Referral Discount:</span>
+                <span>- ₹{orderMutation.data.data.referralDiscountApplied}</span>
+              </div>
+            ) : null}
             <div className="flex justify-between text-base font-bold pt-2 border-t border-dashed border-surface-100 dark:border-surface-700/50">
-              <span>Total Amount:</span>
-              <span className="text-primary-600 dark:text-primary-400">₹{reg.amountPaid}</span>
+              <span>Payable Amount:</span>
+              <span className="text-primary-600 dark:text-primary-400">
+                ₹{orderMutation.data?.data.amount !== undefined ? orderMutation.data.data.amount : reg.amountPaid}
+              </span>
             </div>
           </div>
         </div>

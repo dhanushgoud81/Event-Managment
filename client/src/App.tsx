@@ -46,7 +46,6 @@ import { PaymentsListPage } from '@/pages/admin/PaymentsListPage';
 import { WalletPage } from '@/pages/user/WalletPage';
 import { ReferralsPage } from '@/pages/user/ReferralsPage';
 import { NotificationsPage } from '@/pages/user/NotificationsPage';
-import { ReferralSettingsPage } from '@/pages/admin/ReferralSettingsPage';
 
 // Phase 6 Pages
 import { UserDashboardPage } from '@/pages/user/UserDashboardPage';
@@ -154,7 +153,6 @@ const App: React.FC = () => {
              <Route path="/admin/registrations" element={<DashboardPlaceholder title="Registrations" />} />
             <Route path="/admin/payments" element={<PaymentsListPage />} />
             <Route path="/admin/users" element={<DashboardPlaceholder title="Users" />} />
-            <Route path="/admin/referrals" element={<ReferralSettingsPage />} />
              <Route path="/admin/reports" element={<DashboardPlaceholder title="Reports" />} />
             <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
             <Route path="/admin/settings" element={<SettingsPage />} />

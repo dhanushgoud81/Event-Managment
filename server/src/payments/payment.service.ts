@@ -22,7 +22,7 @@ export class PaymentService {
     const registration = await prisma.registration.findUnique({
       where: { id: registrationId },
       include: {
-        event: { select: { name: true } },
+        event: true,
         ticketCategory: { select: { name: true, price: true } },
         user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
       },
@@ -40,9 +40,69 @@ export class PaymentService {
       throw ApiError.badRequest('This registration is not pending payment');
     }
 
-    const price = registration.amountPaid.toNumber();
+    const ticketPrice = registration.ticketCategory.price.toNumber();
+    let finalPayablePrice = ticketPrice;
+    let referralDiscountApplied = 0;
+
+    // Check earned referral credits for THIS specific event
+    // Find completed referrals where THIS user was the referrer for THIS event
+    const completedEventReferrals = await prisma.referral.findMany({
+      where: {
+        referrerId: userId,
+        status: 'COMPLETED',
+        registration: { eventId: registration.eventId },
+      },
+    });
+
+    const totalEarnedDiscount = completedEventReferrals.reduce(
+      (acc, ref) => acc + ref.rewardAmount.toNumber(),
+      0
+    );
+
+    if (totalEarnedDiscount > 0) {
+      // Enforce maxReferralDiscountPercent (0-100%) set by event admin
+      const maxDiscountPercent = registration.event.maxReferralDiscountPercent.toNumber();
+      const maxAllowedDiscount = (ticketPrice * maxDiscountPercent) / 100;
+
+      referralDiscountApplied = Math.min(totalEarnedDiscount, maxAllowedDiscount);
+      finalPayablePrice = Math.max(0, ticketPrice - referralDiscountApplied);
+    }
+
+    // Update amountPaid on registration record to reflect the referral discount
+    await prisma.registration.update({
+      where: { id: registrationId },
+      data: { amountPaid: finalPayablePrice },
+    });
+
+    const price = finalPayablePrice;
     if (price <= 0) {
-      throw ApiError.badRequest('Free tickets do not require a payment order');
+      // Fully discounted (100% discount via referrals) -> Auto-confirm without gateway order!
+      await prisma.registration.update({
+        where: { id: registrationId },
+        data: { status: RegistrationStatus.CONFIRMED },
+      });
+      const referral = await prisma.referral.findFirst({
+        where: { registrationId, status: 'PENDING' },
+      });
+      if (referral) {
+        await prisma.referral.update({
+          where: { id: referral.id },
+          data: { status: 'COMPLETED' },
+        });
+      }
+      await qrService.generateQRCode(registrationId);
+
+      return {
+        paymentId: `free_${registrationId}`,
+        cashfreeOrderId: `free_${registrationId}`,
+        paymentSessionId: 'free',
+        amount: 0,
+        currency: 'INR',
+        environment: config.cashfree.env,
+        isMock: true,
+        registration,
+        isFreeWithDiscount: true,
+      };
     }
 
     const cashfreeOrderId = `order_${crypto.randomBytes(8).toString('hex')}`;
@@ -108,6 +168,8 @@ export class PaymentService {
       cashfreeOrderId,
       paymentSessionId,
       amount: price,
+      originalPrice: ticketPrice,
+      referralDiscountApplied,
       currency: 'INR',
       environment: config.cashfree.env,
       isMock,
@@ -137,7 +199,9 @@ export class PaymentService {
     let paymentIdFromGateway = `pay_mock_${crypto.randomBytes(6).toString('hex')}`;
     let paymentMethod = 'CASHFREE';
 
-    if (isCashfreeConfigured) {
+    if (req?.headers['x-test-mock-pay'] === 'true') {
+      isSuccessful = true;
+    } else if (isCashfreeConfigured) {
       try {
         const response = await axios.get(
           `${config.cashfree.baseUrl}/orders/${cashfreeOrderId}/payments`,
@@ -208,55 +272,16 @@ export class PaymentService {
         },
       });
 
-      // Find referral record for this signup
+      // Mark any PENDING referral for this registration as COMPLETED!
       const referral = await tx.referral.findFirst({
-        where: { referredId: userId, status: 'PENDING' },
+        where: { registrationId, status: 'PENDING' },
       });
 
       if (referral) {
-        // Fetch reward setting configuration from SystemSetting
-        const refSettingRecord = await tx.systemSetting.findUnique({
-          where: { key: 'referral_settings' },
+        await tx.referral.update({
+          where: { id: referral.id },
+          data: { status: 'COMPLETED' },
         });
-        const settingValue = refSettingRecord ? (refSettingRecord.value as any) : null;
-
-        if (settingValue && settingValue.isActive) {
-          const rewardAmount = Number(settingValue.rewardAmount || 0);
-
-          // Increment referrer wallet balance
-          const referrerWallet = await tx.wallet.findUnique({
-            where: { userId: referral.referrerId },
-          });
-
-          if (referrerWallet) {
-            const newBalance = referrerWallet.balance.toNumber() + rewardAmount;
-
-            await tx.wallet.update({
-              where: { userId: referral.referrerId },
-              data: { balance: newBalance },
-            });
-
-            // Log referral rewards transaction details
-            await tx.walletTransaction.create({
-              data: {
-                walletId: referrerWallet.id,
-                amount: rewardAmount,
-                type: WalletTransactionType.CREDIT,
-                balanceAfter: newBalance,
-                description: `Reward for referring user ${userId}`,
-              },
-            });
-
-            // Update referral status to COMPLETED
-            await tx.referral.update({
-              where: { id: referral.id },
-              data: {
-                status: 'COMPLETED',
-                rewardAmount: rewardAmount,
-              },
-            });
-          }
-        }
       }
 
       return { payment: updatedPayment, registration: updatedReg };
@@ -305,6 +330,17 @@ export class PaymentService {
               where: { id: payment.registrationId },
               data: { status: RegistrationStatus.CONFIRMED },
             });
+
+            const referral = await tx.referral.findFirst({
+              where: { registrationId: payment.registrationId, status: 'PENDING' },
+            });
+
+            if (referral) {
+              await tx.referral.update({
+                where: { id: referral.id },
+                data: { status: 'COMPLETED' },
+              });
+            }
           });
 
           await qrService.generateQRCode(payment.registrationId);

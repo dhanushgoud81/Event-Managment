@@ -47,6 +47,13 @@ export const eventBaseSchema = z.object({
       z.string().transform((val) => val === 'true'),
     ])
     .default(false),
+  referralRewardType: z.enum(['FIXED', 'PERCENTAGE']).default('FIXED'),
+  referralRewardValue: z.coerce.number().min(0, 'Reward value must be non-negative').default(0),
+  maxReferralDiscountPercent: z.coerce
+    .number()
+    .min(0, 'Max discount must be at least 0%')
+    .max(100, 'Max discount cannot exceed 100%')
+    .default(100),
 });
 
 // Refinement logic for creation (all dates are required)

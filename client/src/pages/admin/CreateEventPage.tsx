@@ -31,6 +31,9 @@ const eventFormSchema = z.object({
   contactPhone: z.string().optional(),
   tags: z.string().optional(),
   isFeatured: z.boolean().default(false),
+  referralRewardType: z.enum(['FIXED', 'PERCENTAGE']).default('FIXED'),
+  referralRewardValue: z.coerce.number().min(0, 'Must be positive').default(0),
+  maxReferralDiscountPercent: z.coerce.number().min(0).max(100, 'Cannot exceed 100%').default(100),
 });
 
 type EventForm = z.infer<typeof eventFormSchema>;
@@ -67,6 +70,9 @@ export const CreateEventPage: React.FC = () => {
       contactPhone: '',
       tags: '',
       isFeatured: false,
+      referralRewardType: 'FIXED',
+      referralRewardValue: 0,
+      maxReferralDiscountPercent: 100,
     },
   });
 
@@ -173,6 +179,35 @@ export const CreateEventPage: React.FC = () => {
               <input type="checkbox" className="w-4 h-4 rounded border-surface-300 text-primary-500 focus:ring-primary-500" {...register('isFeatured')} />
               <span className="text-sm font-semibold">Feature this event on homepage</span>
             </label>
+          </div>
+        </Card>
+
+        {/* Event Referral & Discount Settings */}
+        <Card className="space-y-4">
+          <h2 className="text-lg font-bold">Referral & Discount Settings</h2>
+          <p className="text-xs text-surface-500">Configure event-specific discounts earned when users refer friends to this event.</p>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-1.5">
+              <label className="label">Reward Type</label>
+              <select className="input py-2" {...register('referralRewardType')}>
+                <option value="FIXED">Fixed Amount (₹)</option>
+                <option value="PERCENTAGE">Percentage (%)</option>
+              </select>
+            </div>
+            <Input
+              label="Reward Value per User Brought In"
+              type="number"
+              placeholder="e.g. 50"
+              error={errors.referralRewardValue?.message}
+              {...register('referralRewardValue')}
+            />
+            <Input
+              label="Max Referral Discount Cap (%)"
+              type="number"
+              placeholder="100"
+              error={errors.maxReferralDiscountPercent?.message}
+              {...register('maxReferralDiscountPercent')}
+            />
           </div>
         </Card>
 
