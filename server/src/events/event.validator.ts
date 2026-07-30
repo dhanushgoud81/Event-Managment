@@ -28,8 +28,25 @@ export const eventBaseSchema = z.object({
   organizerWebsite: z.string().url('Invalid website URL').optional().or(z.literal('')).nullable(),
   contactEmail: z.string().email('Invalid email format').optional().or(z.literal('')).nullable(),
   contactPhone: z.string().optional().nullable(),
-  tags: z.array(z.string()).default([]),
-  isFeatured: z.boolean().default(false),
+  tags: z
+    .union([
+      z.array(z.string()),
+      z.string().transform((val) => {
+        try {
+          const parsed = JSON.parse(val);
+          return Array.isArray(parsed) ? parsed : [val];
+        } catch {
+          return val ? val.split(',').map((t) => t.trim()).filter(Boolean) : [];
+        }
+      }),
+    ])
+    .default([]),
+  isFeatured: z
+    .union([
+      z.boolean(),
+      z.string().transform((val) => val === 'true'),
+    ])
+    .default(false),
 });
 
 // Refinement logic for creation (all dates are required)

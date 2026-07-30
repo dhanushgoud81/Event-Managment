@@ -10,7 +10,7 @@ export class PaymentController {
   async createOrder(req: Request, res: Response, next: NextFunction) {
     try {
       const order = await paymentService.createOrder(req.body, req.user!.userId, req);
-      return ApiResponse.success(res, order, 'Razorpay order created successfully');
+      return ApiResponse.success(res, order, 'Cashfree order created successfully');
     } catch (error) {
       next(error);
     }
@@ -25,6 +25,19 @@ export class PaymentController {
       return ApiResponse.success(res, result, 'Payment verified successfully');
     } catch (error) {
       next(error);
+    }
+  }
+
+  /**
+   * POST /api/payments/webhook
+   */
+  async handleWebhook(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await paymentService.processWebhook(req.body);
+      return res.status(200).json(result);
+    } catch (error) {
+      // Always return 200 to Cashfree webhook so it doesn't retry infinitely on error
+      return res.status(200).json({ status: 'error', received: true });
     }
   }
 

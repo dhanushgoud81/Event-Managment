@@ -3,18 +3,21 @@ import { paymentController } from './payment.controller';
 import { authenticate } from '../middleware/auth.middleware';
 import { isAdmin } from '../middleware/rbac.middleware';
 import { validateBody, validateQuery } from '../middleware/validate.middleware';
-import { createRazorpayOrderSchema, verifyPaymentSchema, listPaymentsQuerySchema } from './payment.validator';
+import { createPaymentOrderSchema, verifyPaymentSchema, listPaymentsQuerySchema } from './payment.validator';
 import { z } from 'zod';
 
 const router = Router();
 
-// All routes require authentication
+// Public Webhook route for Cashfree
+router.post('/webhook', paymentController.handleWebhook.bind(paymentController));
+
+// Protected routes require authentication
 router.use(authenticate);
 
 // Orders & Verification
 router.post(
   '/orders',
-  validateBody(createRazorpayOrderSchema),
+  validateBody(createPaymentOrderSchema),
   paymentController.createOrder.bind(paymentController)
 );
 

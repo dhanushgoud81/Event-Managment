@@ -30,18 +30,17 @@ export interface CreateOrderRequest {
 
 export interface CreateOrderResponse {
   paymentId: string;
-  razorpayOrderId: string;
+  cashfreeOrderId: string;
+  paymentSessionId: string;
   amount: number;
   currency: string;
-  keyId: string;
+  environment: 'TEST' | 'PRODUCTION';
   isMock: boolean;
   registration: Registration;
 }
 
 export interface VerifyPaymentRequest {
-  razorpayOrderId: string;
-  razorpayPaymentId: string;
-  razorpaySignature: string;
+  cashfreeOrderId: string;
   registrationId: string;
 }
 

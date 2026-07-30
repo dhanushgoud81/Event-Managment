@@ -7,18 +7,22 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Wallet, ShieldCheck, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { load } from '@cashfreepayments/cashfree-js';
 
 export const PaymentsPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Read registration ID from URL query ?regId=xyz or state
+  // Read registration ID and order ID from URL query ?regId=xyz&order_id=xyz or location state
   const queryParams = new URLSearchParams(location.search);
   const regId = queryParams.get('regId') || location.state?.registrationId || '';
+  const returnedOrderId = queryParams.get('order_id');
 
   const { data, isLoading, error } = useRegistration(regId);
   const orderMutation = useCreatePaymentOrder();
   const verifyMutation = useVerifyPayment();
+  const verificationTriedRef = React.useRef(false);
+  const [paymentErrorMessage, setPaymentErrorMessage] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!regId) {
@@ -27,76 +31,71 @@ export const PaymentsPage: React.FC = () => {
     }
   }, [regId, navigate]);
 
+  // Handle return URL verification after Cashfree checkout redirect
+  React.useEffect(() => {
+    if (returnedOrderId && regId && !verificationTriedRef.current) {
+      verificationTriedRef.current = true;
+      setPaymentErrorMessage(null);
+      toast.loading('Verifying payment status with Cashfree...', { id: 'cf-verify' });
+      verifyMutation.mutate(
+        {
+          cashfreeOrderId: returnedOrderId,
+          registrationId: regId,
+        },
+        {
+          onSuccess: () => {
+            toast.dismiss('cf-verify');
+          },
+          onError: (err: any) => {
+            toast.dismiss('cf-verify');
+            const msg = err.response?.data?.message || err.message || 'Payment failed or was cancelled';
+            setPaymentErrorMessage(msg);
+            // Clean order_id from query params so page resets state cleanly
+            navigate(`/dashboard/payments?regId=${regId}`, { replace: true });
+          },
+        }
+      );
+    }
+  }, [returnedOrderId, regId]);
+
   const handleCheckout = () => {
+    setPaymentErrorMessage(null);
     orderMutation.mutate(
       { registrationId: regId },
       {
-        onSuccess: (response) => {
+        onSuccess: async (response) => {
           const orderData = response.data;
 
           if (orderData.isMock) {
-            // Simulated local payment sandbox (no keys)
-            toast.success('Simulating local sandbox checkout...', { duration: 3000 });
+            // Simulated local payment sandbox mode
+            toast.success('Simulating local sandbox checkout...', { duration: 2000 });
             setTimeout(() => {
               verifyMutation.mutate({
-                razorpayOrderId: orderData.razorpayOrderId,
-                razorpayPaymentId: `pay_mock_${Math.random().toString(36).substring(7)}`,
-                razorpaySignature: 'mock_sig',
+                cashfreeOrderId: orderData.cashfreeOrderId,
                 registrationId: regId,
               });
-            }, 1500);
+            }, 1000);
           } else {
-            // Setup Razorpay Checkout integration
-            const options = {
-              key: orderData.keyId,
-              amount: orderData.amount * 100,
-              currency: orderData.currency,
-              name: 'EventHub Ticketing',
-              description: `Admission Pass for ${orderData.registration.event?.name}`,
-              order_id: orderData.razorpayOrderId,
-              handler: (res: any) => {
-                verifyMutation.mutate({
-                  razorpayOrderId: orderData.razorpayOrderId,
-                  razorpayPaymentId: res.razorpay_payment_id,
-                  razorpaySignature: res.razorpay_signature,
-                  registrationId: regId,
-                });
-              },
-              prefill: {
-                name: `${orderData.registration.user?.firstName} ${orderData.registration.user?.lastName}`,
-                email: orderData.registration.user?.email,
-              },
-              theme: {
-                color: '#6366f1',
-              },
-            };
+            try {
+              const cashfree = await load({
+                mode: orderData.environment === 'PRODUCTION' ? 'production' : 'sandbox',
+              });
 
-            const rzp = new (window as any).Razorpay(options);
-            rzp.on('payment.failed', (err: any) => {
-              toast.error(`Checkout failed: ${err.error.description}`);
-            });
-            rzp.open();
+              cashfree.checkout({
+                paymentSessionId: orderData.paymentSessionId,
+                redirectTarget: '_self',
+              });
+            } catch (err: any) {
+              toast.error(`Cashfree SDK Initialization failed: ${err.message}`);
+            }
           }
+        },
+        onError: (err: any) => {
+          const msg = err.response?.data?.message || err.message || 'Failed to initiate order';
+          setPaymentErrorMessage(msg);
         },
       }
     );
-  };
-
-  // Add Razorpay CDN script dynamically in case of production execution
-  React.useEffect(() => {
-    if (data && Number(data.data.amountPaid) > 0 && !configPaymentsMocked()) {
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.async = true;
-      document.body.appendChild(script);
-      return () => {
-        document.body.removeChild(script);
-      };
-    }
-  }, [data]);
-
-  const configPaymentsMocked = () => {
-    return orderMutation.data?.data.isMock ?? true;
   };
 
   if (isLoading) return <PageLoader message="Loading checkout portal..." />;
@@ -118,8 +117,18 @@ export const PaymentsPage: React.FC = () => {
     <div className="max-w-xl mx-auto space-y-6 animate-fade-in-up">
       <div>
         <h1 className="text-2xl font-bold">Admission Pass Checkout</h1>
-        <p className="text-surface-500">Secure ticket payment checkout using Razorpay.</p>
+        <p className="text-surface-500">Secure ticket payment checkout powered by Cashfree Payments.</p>
       </div>
+
+      {paymentErrorMessage && (
+        <div className="p-4 border border-danger-200 bg-danger-50 text-danger-700 rounded-xl flex items-start gap-3 text-sm">
+          <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h4 className="font-bold">Payment Not Completed</h4>
+            <p>{paymentErrorMessage}</p>
+          </div>
+        </div>
+      )}
 
       <Card className="space-y-6">
         <div className="space-y-4">
@@ -158,12 +167,12 @@ export const PaymentsPage: React.FC = () => {
             onClick={handleCheckout}
             isLoading={orderMutation.isPending || verifyMutation.isPending}
           >
-            Pay Now (Secure Check-out)
+            {paymentErrorMessage ? 'Retry Payment' : 'Pay Now (Cashfree Secure Checkout)'}
           </Button>
 
           <div className="flex items-center justify-center gap-1.5 text-xs text-surface-400">
             <ShieldCheck className="w-4 h-4 text-success-500" />
-            <span>Payments processed using Razorpay (SSL encrypted).</span>
+            <span>Payments processed securely via Cashfree Gateway (256-bit SSL).</span>
           </div>
         </div>
       </Card>

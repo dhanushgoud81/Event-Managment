@@ -5,18 +5,18 @@ import { logAudit } from '../middleware/audit.middleware';
 import { qrService } from '../tickets/qr.service';
 import { generateOrderId } from '../utils/generate-code';
 import { PaymentStatus, RegistrationStatus, WalletTransactionType, Prisma } from '@prisma/client';
-import type { CreateRazorpayOrderInput, VerifyPaymentInput, ListPaymentsQuery } from './payment.validator';
+import type { CreatePaymentOrderInput, VerifyPaymentInput, ListPaymentsQuery } from './payment.validator';
 import { Request } from 'express';
+import axios from 'axios';
 import crypto from 'crypto';
 
-// In case Razorpay API keys are missing, we simulate Razorpay sandbox payments in development mode
-const isRazorpayMocked = !config.razorpay.keyId || !config.razorpay.keySecret;
+const isCashfreeConfigured = !!(config.cashfree.clientId && config.cashfree.clientSecret);
 
 export class PaymentService {
   /**
-   * Create a Razorpay Order for a registration
+   * Create a Cashfree Order for a registration
    */
-  async createOrder(data: CreateRazorpayOrderInput, userId: string, req?: Request) {
+  async createOrder(data: CreatePaymentOrderInput, userId: string, req?: Request) {
     const { registrationId } = data;
 
     const registration = await prisma.registration.findUnique({
@@ -24,6 +24,7 @@ export class PaymentService {
       include: {
         event: { select: { name: true } },
         ticketCategory: { select: { name: true, price: true } },
+        user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
       },
     });
 
@@ -44,31 +45,47 @@ export class PaymentService {
       throw ApiError.badRequest('Free tickets do not require a payment order');
     }
 
-    let razorpayOrderId = `order_mock_${crypto.randomBytes(8).toString('hex')}`;
-    let receipt = `receipt_${registration.registrationNumber}`;
+    const cashfreeOrderId = `order_${crypto.randomBytes(8).toString('hex')}`;
+    let paymentSessionId = `session_mock_${crypto.randomBytes(8).toString('hex')}`;
+    const isMock = !isCashfreeConfigured;
 
-    if (!isRazorpayMocked) {
+    if (isCashfreeConfigured) {
       try {
-        const Razorpay = require('razorpay');
-        const razorpay = new Razorpay({
-          key_id: config.razorpay.keyId,
-          key_secret: config.razorpay.keySecret,
-        });
+        const returnUrl = `${config.appUrl}/dashboard/payments?regId=${registrationId}&order_id=${cashfreeOrderId}`;
+        const phone = registration.user.phone || '9999999999';
+        const customerName = `${registration.user.firstName} ${registration.user.lastName}`.trim() || 'Attendee';
 
-        const options = {
-          amount: Math.round(price * 100), // Amount in paise
-          currency: 'INR',
-          receipt,
-          notes: {
-            registrationId,
-            userId,
+        const cashfreeResponse = await axios.post(
+          `${config.cashfree.baseUrl}/orders`,
+          {
+            order_id: cashfreeOrderId,
+            order_amount: price,
+            order_currency: 'INR',
+            customer_details: {
+              customer_id: registration.user.id,
+              customer_email: registration.user.email,
+              customer_name: customerName,
+              customer_phone: phone,
+            },
+            order_meta: {
+              return_url: returnUrl,
+              notify_url: `${config.apiUrl}/api/payments/webhook`,
+            },
           },
-        };
+          {
+            headers: {
+              'x-client-id': config.cashfree.clientId,
+              'x-client-secret': config.cashfree.clientSecret,
+              'x-api-version': '2023-08-01',
+              'Content-Type': 'application/json',
+            },
+          }
+        );
 
-        const order = await razorpay.orders.create(options);
-        razorpayOrderId = order.id;
+        paymentSessionId = cashfreeResponse.data.payment_session_id;
       } catch (err: any) {
-        throw ApiError.badRequest(`Razorpay order creation failed: ${err.message}`);
+        const errorMsg = err.response?.data?.message || err.message;
+        throw ApiError.badRequest(`Cashfree order creation failed: ${errorMsg}`);
       }
     }
 
@@ -79,7 +96,7 @@ export class PaymentService {
         registrationId,
         userId,
         amount: price,
-        razorpayOrderId,
+        razorpayOrderId: cashfreeOrderId, // stored in existing DB schema field
         status: PaymentStatus.PENDING,
       },
     });
@@ -88,23 +105,24 @@ export class PaymentService {
 
     return {
       paymentId: payment.id,
-      razorpayOrderId,
+      cashfreeOrderId,
+      paymentSessionId,
       amount: price,
       currency: 'INR',
-      keyId: config.razorpay.keyId || 'mock_key_id',
-      isMock: isRazorpayMocked,
+      environment: config.cashfree.env,
+      isMock,
       registration,
     };
   }
 
   /**
-   * Verify Razorpay Payment Signature
+   * Verify Cashfree Payment Status
    */
   async verifyPayment(data: VerifyPaymentInput, userId: string, req?: Request) {
-    const { razorpayOrderId, razorpayPaymentId, razorpaySignature, registrationId } = data;
+    const { cashfreeOrderId, registrationId } = data;
 
     const payment = await prisma.payment.findFirst({
-      where: { razorpayOrderId, registrationId },
+      where: { razorpayOrderId: cashfreeOrderId, registrationId },
     });
 
     if (!payment) {
@@ -115,22 +133,59 @@ export class PaymentService {
       return { success: true, message: 'Payment already verified' };
     }
 
-    // Verify signature
-    if (!isRazorpayMocked) {
-      const text = `${razorpayOrderId}|${razorpayPaymentId}`;
-      const generated_signature = crypto
-        .createHmac('sha256', config.razorpay.keySecret)
-        .update(text)
-        .digest('hex');
+    let isSuccessful = false;
+    let paymentIdFromGateway = `pay_mock_${crypto.randomBytes(6).toString('hex')}`;
+    let paymentMethod = 'CASHFREE';
 
-      if (generated_signature !== razorpaySignature) {
-        // Mark payment as failed in db
-        await prisma.payment.update({
-          where: { id: payment.id },
-          data: { status: PaymentStatus.FAILED, razorpayPaymentId },
-        });
-        throw ApiError.badRequest('Invalid payment signature verification failed');
+    if (isCashfreeConfigured) {
+      try {
+        const response = await axios.get(
+          `${config.cashfree.baseUrl}/orders/${cashfreeOrderId}/payments`,
+          {
+            headers: {
+              'x-client-id': config.cashfree.clientId,
+              'x-client-secret': config.cashfree.clientSecret,
+              'x-api-version': '2023-08-01',
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+
+        const payments = response.data;
+        if (Array.isArray(payments) && payments.length > 0) {
+          const successfulPayment = payments.find((p: any) => p.payment_status === 'SUCCESS');
+          if (successfulPayment) {
+            isSuccessful = true;
+            paymentIdFromGateway = successfulPayment.cf_payment_id?.toString() || paymentIdFromGateway;
+            paymentMethod = successfulPayment.payment_group || paymentMethod;
+          } else {
+            const latestPayment = payments[0];
+            const status = latestPayment.payment_status || 'FAILED';
+            const message = latestPayment.payment_message || `Payment ${status.toLowerCase()}`;
+            
+            await prisma.payment.update({
+              where: { id: payment.id },
+              data: { status: PaymentStatus.FAILED, razorpayPaymentId: latestPayment.cf_payment_id?.toString() },
+            });
+            
+            throw ApiError.badRequest(`Payment status: ${status} (${message})`);
+          }
+        } else {
+          // User closed checkout modal or dropped before attempting payment
+          throw ApiError.badRequest('Payment was cancelled or dropped before completion.');
+        }
+      } catch (err: any) {
+        if (err instanceof ApiError) throw err;
+        const errorMsg = err.response?.data?.message || err.message;
+        throw ApiError.badRequest(`Cashfree verification error: ${errorMsg}`);
       }
+    } else {
+      // Mock mode
+      isSuccessful = true;
+    }
+
+    if (!isSuccessful) {
+      throw ApiError.badRequest('Payment verification failed');
     }
 
     // Update payment, registration, wallet, and generate QR code in transaction
@@ -140,8 +195,8 @@ export class PaymentService {
         where: { id: payment.id },
         data: {
           status: PaymentStatus.SUCCESSFUL,
-          razorpayPaymentId,
-          razorpaySignature: isRazorpayMocked ? 'mock_sig' : razorpaySignature,
+          razorpayPaymentId: paymentIdFromGateway,
+          method: paymentMethod,
         },
       });
 
@@ -217,6 +272,47 @@ export class PaymentService {
       message: 'Payment verified and ticket confirmed successfully!',
       registration: result.registration,
     };
+  }
+
+  /**
+   * Cashfree Webhook Processor
+   */
+  async processWebhook(payload: any) {
+    // Optionally log to system settings or audit log
+    const eventType = payload.type || payload.event || 'UNKNOWN';
+    const data = payload.data || payload;
+
+    if (data && data.order && data.order.order_id) {
+      const cashfreeOrderId = data.order.order_id;
+      const paymentStatus = data.payment?.payment_status;
+
+      if (paymentStatus === 'SUCCESS') {
+        const payment = await prisma.payment.findFirst({
+          where: { razorpayOrderId: cashfreeOrderId },
+        });
+
+        if (payment && payment.status !== PaymentStatus.SUCCESSFUL) {
+          await prisma.$transaction(async (tx) => {
+            await tx.payment.update({
+              where: { id: payment.id },
+              data: {
+                status: PaymentStatus.SUCCESSFUL,
+                razorpayPaymentId: data.payment?.cf_payment_id?.toString(),
+              },
+            });
+
+            await tx.registration.update({
+              where: { id: payment.registrationId },
+              data: { status: RegistrationStatus.CONFIRMED },
+            });
+          });
+
+          await qrService.generateQRCode(payment.registrationId);
+        }
+      }
+    }
+
+    return { status: 'success', received: true, eventType };
   }
 
   /**

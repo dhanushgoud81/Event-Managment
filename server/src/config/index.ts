@@ -36,10 +36,10 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional().default(''),
   EMAIL_FROM: z.string().default('Event Management <noreply@eventmanagement.com>'),
 
-  // Razorpay
-  RAZORPAY_KEY_ID: z.string().default(''),
-  RAZORPAY_KEY_SECRET: z.string().default(''),
-  RAZORPAY_WEBHOOK_SECRET: z.string().default(''),
+  // Cashfree
+  CASHFREE_CLIENT_ID: z.string().default(''),
+  CASHFREE_CLIENT_SECRET: z.string().default(''),
+  CASHFREE_ENV: z.enum(['TEST', 'PRODUCTION']).default('TEST'),
 
   // File Upload
   UPLOAD_DIR: z.string().default('./uploads'),
@@ -48,8 +48,8 @@ const envSchema = z.object({
 
   // Rate Limiting
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(900000), // 15 min
-  RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(100),
-  AUTH_RATE_LIMIT_MAX: z.coerce.number().default(5),
+  RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(1000),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().default(100),
 
   // Security
   BCRYPT_ROUNDS: z.coerce.number().default(12),
@@ -108,10 +108,14 @@ export const config = {
     from: parsed.data.EMAIL_FROM,
   },
 
-  razorpay: {
-    keyId: parsed.data.RAZORPAY_KEY_ID,
-    keySecret: parsed.data.RAZORPAY_KEY_SECRET,
-    webhookSecret: parsed.data.RAZORPAY_WEBHOOK_SECRET,
+  cashfree: {
+    clientId: parsed.data.CASHFREE_CLIENT_ID,
+    clientSecret: parsed.data.CASHFREE_CLIENT_SECRET,
+    env: parsed.data.CASHFREE_ENV,
+    baseUrl:
+      parsed.data.CASHFREE_ENV === 'PRODUCTION'
+        ? 'https://api.cashfree.com/pg'
+        : 'https://sandbox.cashfree.com/pg',
   },
 
   upload: {

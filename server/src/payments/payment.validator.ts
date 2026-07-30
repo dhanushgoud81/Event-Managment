@@ -1,13 +1,11 @@
 import { z } from 'zod';
 
-export const createRazorpayOrderSchema = z.object({
+export const createPaymentOrderSchema = z.object({
   registrationId: z.string().uuid('Invalid registration ID'),
 });
 
 export const verifyPaymentSchema = z.object({
-  razorpayOrderId: z.string().min(1, 'Order ID is required'),
-  razorpayPaymentId: z.string().min(1, 'Payment ID is required'),
-  razorpaySignature: z.string().min(1, 'Signature is required'),
+  cashfreeOrderId: z.string().min(1, 'Order ID is required'),
   registrationId: z.string().uuid('Invalid registration ID'),
 });
 
@@ -20,6 +18,6 @@ export const listPaymentsQuerySchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
 
-export type CreateRazorpayOrderInput = z.infer<typeof createRazorpayOrderSchema>;
+export type CreatePaymentOrderInput = z.infer<typeof createPaymentOrderSchema>;
 export type VerifyPaymentInput = z.infer<typeof verifyPaymentSchema>;
 export type ListPaymentsQuery = z.infer<typeof listPaymentsQuerySchema>;
