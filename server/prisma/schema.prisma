@@ -1,0 +1,421 @@
+// ============================================
+// Prisma Schema — Event Management System
+// ============================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ──────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  EVENT_MANAGER
+  USER
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  CANCELLED
+  ARCHIVED
+}
+
+enum TicketStatus {
+  ACTIVE
+  INACTIVE
+  SOLD_OUT
+}
+
+enum FormFieldType {
+  TEXT
+  EMAIL
+  PHONE
+  NUMBER
+  DATE
+  TEXTAREA
+  DROPDOWN
+  RADIO
+  CHECKBOX
+  MULTI_SELECT
+  FILE_UPLOAD
+}
+
+enum RegistrationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  SUCCESSFUL
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum ReferralStatus {
+  PENDING
+  COMPLETED
+  REJECTED
+}
+
+enum WalletTransactionType {
+  CREDIT
+  DEBIT
+}
+
+enum NotificationType {
+  REGISTRATION_CONFIRMATION
+  PAYMENT_SUCCESS
+  PAYMENT_FAILURE
+  REFUND
+  EVENT_UPDATE
+  EVENT_CANCELLATION
+  PASSWORD_RESET
+  EMAIL_VERIFICATION
+  REFERRAL_REWARD
+  SYSTEM
+}
+
+// ─── Models ─────────────────────────────────
+
+model User {
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  passwordHash        String    @map("password_hash")
+  firstName           String    @map("first_name")
+  lastName            String    @map("last_name")
+  phone               String?
+  avatarUrl           String?   @map("avatar_url")
+  role                UserRole  @default(USER)
+  referralCode        String    @unique @map("referral_code")
+  emailVerified       Boolean   @default(false) @map("email_verified")
+  emailVerifyToken    String?   @map("email_verify_token")
+  emailVerifyExpiry   DateTime? @map("email_verify_expiry")
+  passwordResetToken  String?   @map("password_reset_token")
+  passwordResetExpiry DateTime? @map("password_reset_expiry")
+  isActive            Boolean   @default(true) @map("is_active")
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until")
+  lastLoginAt         DateTime? @map("last_login_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  events         Event[]
+  registrations  Registration[]
+  payments       Payment[]
+  referralsMade  Referral[]       @relation("referrer")
+  referralsUsed  Referral[]       @relation("referred")
+  wallet         Wallet?
+  notifications  Notification[]
+  auditLogs      AuditLog[]
+  refreshTokens  RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  tokenHash  String   @map("token_hash")
+  deviceInfo String?  @map("device_info")
+  ipAddress  String?  @map("ip_address")
+  expiresAt  DateTime @map("expires_at")
+  isRevoked  Boolean  @default(false) @map("is_revoked")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model Event {
+  id               String      @id @default(uuid())
+  createdBy        String      @map("created_by")
+  name             String
+  slug             String      @unique
+  description      String      @db.Text
+  bannerUrl        String?     @map("banner_url")
+  venue            String
+  address          String?
+  city             String?
+  state            String?
+  country          String?
+  startDate        DateTime    @map("start_date")
+  endDate          DateTime    @map("end_date")
+  regStartDate     DateTime    @map("reg_start_date")
+  regEndDate       DateTime    @map("reg_end_date")
+  maxParticipants  Int         @map("max_participants")
+  currentCount     Int         @default(0) @map("current_count")
+  status           EventStatus @default(DRAFT)
+  organizerName    String?     @map("organizer_name")
+  organizerEmail   String?     @map("organizer_email")
+  organizerPhone   String?     @map("organizer_phone")
+  organizerWebsite String?     @map("organizer_website")
+  contactEmail     String?     @map("contact_email")
+  contactPhone     String?     @map("contact_phone")
+  tags             String[]    @default([])
+  isFeatured       Boolean     @default(false) @map("is_featured")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  creator        User             @relation(fields: [createdBy], references: [id])
+  ticketCategories TicketCategory[]
+  formFields     FormField[]
+  registrations  Registration[]
+
+  @@index([status])
+  @@index([startDate])
+  @@index([createdBy])
+  @@map("events")
+}
+
+model TicketCategory {
+  id            String       @id @default(uuid())
+  eventId       String       @map("event_id")
+  name          String
+  description   String?      @db.Text
+  price         Decimal      @db.Decimal(10, 2)
+  maxQuantity   Int          @map("max_quantity")
+  soldQuantity  Int          @default(0) @map("sold_quantity")
+  saleStart     DateTime     @map("sale_start")
+  saleEnd       DateTime     @map("sale_end")
+  status        TicketStatus @default(ACTIVE)
+  sortOrder     Int          @default(0) @map("sort_order")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  event         Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  registrations Registration[]
+
+  @@index([eventId])
+  @@map("ticket_categories")
+}
+
+model FormField {
+  id              String        @id @default(uuid())
+  eventId         String        @map("event_id")
+  label           String
+  fieldType       FormFieldType @map("field_type")
+  placeholder     String?
+  helpText        String?       @map("help_text")
+  isRequired      Boolean       @default(false) @map("is_required")
+  displayOrder    Int           @map("display_order")
+  options         Json?
+  validationRules Json?         @map("validation_rules")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  event          Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  formResponses  FormResponse[]
+
+  @@index([eventId])
+  @@map("form_fields")
+}
+
+model Registration {
+  id                 String             @id @default(uuid())
+  userId             String             @map("user_id")
+  eventId            String             @map("event_id")
+  ticketCategoryId   String             @map("ticket_category_id")
+  registrationNumber String             @unique @map("registration_number")
+  status             RegistrationStatus @default(PENDING)
+  amountPaid         Decimal            @default(0) @db.Decimal(10, 2) @map("amount_paid")
+  idempotencyKey     String?            @unique @map("idempotency_key")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  // Relations
+  user           User             @relation(fields: [userId], references: [id])
+  event          Event            @relation(fields: [eventId], references: [id])
+  ticketCategory TicketCategory   @relation(fields: [ticketCategoryId], references: [id])
+  formResponses  FormResponse[]
+  payments       Payment[]
+  qrCode         QRCode?
+  referral       Referral?
+
+  @@unique([userId, eventId])
+  @@index([userId])
+  @@index([eventId])
+  @@index([status])
+  @@map("registrations")
+}
+
+model FormResponse {
+  id             String  @id @default(uuid())
+  registrationId String  @map("registration_id")
+  formFieldId    String  @map("form_field_id")
+  value          String? @db.Text
+  fileUrl        String? @map("file_url")
+
+  // Relations
+  registration Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  formField    FormField    @relation(fields: [formFieldId], references: [id])
+
+  @@index([registrationId])
+  @@map("form_responses")
+}
+
+model Payment {
+  id                 String        @id @default(uuid())
+  registrationId     String        @map("registration_id")
+  userId             String        @map("user_id")
+  orderId            String        @unique @map("order_id")
+  razorpayOrderId    String?       @unique @map("razorpay_order_id")
+  razorpayPaymentId  String?       @map("razorpay_payment_id")
+  razorpaySignature  String?       @map("razorpay_signature")
+  amount             Decimal       @db.Decimal(10, 2)
+  currency           String        @default("INR")
+  status             PaymentStatus @default(CREATED)
+  method             String?
+  gatewayResponse    Json?         @map("gateway_response")
+  refundId           String?       @map("refund_id")
+  refundAmount       Decimal?      @db.Decimal(10, 2) @map("refund_amount")
+  refundReason       String?       @map("refund_reason")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  registration Registration @relation(fields: [registrationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([registrationId])
+  @@index([userId])
+  @@index([status])
+  @@map("payments")
+}
+
+model QRCode {
+  id             String    @id @default(uuid())
+  registrationId String    @unique @map("registration_id")
+  code           String    @unique
+  qrImageUrl     String    @map("qr_image_url")
+  isScanned      Boolean   @default(false) @map("is_scanned")
+  scannedAt      DateTime? @map("scanned_at")
+  scannedBy      String?   @map("scanned_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  registration Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  @@map("qr_codes")
+}
+
+model Referral {
+  id             String         @id @default(uuid())
+  referrerId     String         @map("referrer_id")
+  referredId     String         @map("referred_id")
+  registrationId String         @unique @map("registration_id")
+  rewardAmount   Decimal        @default(0) @db.Decimal(10, 2) @map("reward_amount")
+  status         ReferralStatus @default(PENDING)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  referrer           User                @relation("referrer", fields: [referrerId], references: [id])
+  referred           User                @relation("referred", fields: [referredId], references: [id])
+  registration       Registration        @relation(fields: [registrationId], references: [id])
+  walletTransactions WalletTransaction[]
+
+  @@index([referrerId])
+  @@index([referredId])
+  @@map("referrals")
+}
+
+model Wallet {
+  id        String   @id @default(uuid())
+  userId    String   @unique @map("user_id")
+  balance   Decimal  @default(0) @db.Decimal(10, 2)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id           String                @id @default(uuid())
+  walletId     String                @map("wallet_id")
+  referralId   String?               @map("referral_id")
+  type         WalletTransactionType
+  amount       Decimal               @db.Decimal(10, 2)
+  balanceAfter Decimal               @db.Decimal(10, 2) @map("balance_after")
+  description  String
+  createdAt    DateTime              @default(now()) @map("created_at")
+
+  // Relations
+  wallet   Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  referral Referral? @relation(fields: [referralId], references: [id])
+
+  @@index([walletId])
+  @@map("wallet_transactions")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  title     String
+  message   String           @db.Text
+  type      NotificationType
+  isRead    Boolean          @default(false) @map("is_read")
+  metadata  Json?
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  userId        String?  @map("user_id")
+  entityType    String   @map("entity_type")
+  entityId      String   @map("entity_id")
+  action        String
+  previousValue Json?    @map("previous_value")
+  updatedValue  Json?    @map("updated_value")
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SystemSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
